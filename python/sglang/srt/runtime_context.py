@@ -24,9 +24,10 @@ getters. The resolved parallel **configuration** is the same object's ``config``
 hop (``get_parallel().config.tp_size``), which reads the published ``parallel``
 bag: bare is the live group, ``config`` is what was configured.
 
-``get_server_args()`` returns the process-wide ``ServerArgs``. This is the pristine / resolved-at-startup **read-only** record kept
-for debug and reproduction; business code reads resolved config from the
-namespace bags below, not from this object. The context owns the storage:
+``get_server_args()`` returns the process-wide ``ServerArgs``. This is the
+user's raw input, kept **read-only** for debug and reproduction; what
+resolution decided lives in the declarations (``resolution_result``) and, for
+business code, in the namespace bags below -- never on this object's fields. The context owns the storage:
 publishing goes through ``RuntimeContext.set_server_args`` (the legacy
 ``set_global_server_args_for_scheduler`` / ``get_global_server_args`` are thin
 shims over this slot).
@@ -818,8 +819,8 @@ class RuntimeContext:
         Overwrite-allowed: a re-publish replaces the slot (test kits re-publish
         per test; production ordering discipline lives at the call-sites, e.g.
         the draft-worker guard in ``ModelRunner.__init__``). The published
-        object already carries the resolved configuration (declarations
-        materialize at the end of ``__post_init__``).
+        object is the raw input; the resolution it carries is its declaration
+        stash, which is what the bags are projected from.
         """
         # Seed the capture tier for the new lifecycle (defaults for sentinel
         # and mock publishes, which carry no config).

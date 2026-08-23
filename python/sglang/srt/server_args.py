@@ -3706,12 +3706,11 @@ class ServerArgs:
 
         `dataclasses.replace` builds a new instance, so the copy carries none of
         what makes a record resolved: no raw snapshot, no declarations, no
-        materialization. The next publish therefore finds an unmaterialized
-        record and runs the pipeline over values it already decided -- DP
-        attention halves `chunked_prefill_size` a second time (8192 -> 4096 ->
-        2048) and the schedule conservativeness is scaled again (0.3 -> 0.09).
-        The Ray paths replace `dist_init_addr` on a resolved record, which is
-        how they hit it.
+        finished flag. The next publish therefore resolves it again, which
+        drops every decision the stash held -- the late ones (the auto-detected
+        parsers) and the direct ones alike -- and re-runs the device probes in
+        whatever process opened the copy. The Ray paths replace
+        `dist_init_addr` on a resolved record, which is how they reach this.
 
         The change is appended to the stash rather than left on the field: the
         projection reads the raw snapshot plus the declarations, so a field the

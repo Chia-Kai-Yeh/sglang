@@ -14,9 +14,10 @@
 """Declarative model-override registry.
 
 Model-identity adjustments to the server configuration are DECLARED here and
-materialized onto ``server_args`` at the end of ``__post_init__`` (gate
-order, last writer wins) — model code never mutates ``ServerArgs`` fields
-imperatively.
+appended to the record's declaration stash (gate order, last writer wins).
+Nothing is written back onto ``ServerArgs``: the record holds the user's raw
+input, and a decision is read through ``resolution_result`` or the published
+config bags — model code never mutates ``ServerArgs`` fields imperatively.
 
 Two declaration forms, keyed on ``hf_config.architectures[0]``:
 
@@ -259,18 +260,18 @@ def _apply_fields(server_args: Any, fields: Dict[str, Any]) -> None:
 
 
 def declare_resolution(server_args: Any, source: str, **fields: Any) -> None:
-    """Record a resolution write in the declaration stash, and apply it now.
+    """Record a resolution write in the declaration stash.
 
-    The stash is what the projection reads, so a resolver that only assigns
-    the field leaves that write invisible to it. The immediate write keeps the
-    resolver's successors seeing the value where they read the field directly.
+    The stash *is* the resolution result: the config bags are projected from it,
+    `resolution_result` answers from it, and nothing writes the field. The
+    record keeps what the caller passed, which is what makes the pipeline
+    reproducible over a copy -- resolving a bare `dataclasses.replace` runs over
+    the same input the parent got instead of over the parent's output.
 
-    What it does change is which writer wins. A declaration is appended and
-    replayed last, so a resolver that declares a field a *deferred* writer (a
-    post-process pass, a registry entry) also decides now beats it, where its
-    bare assignment used to be overwritten by that writer's declaration. A
-    resolver that gates on such a field has to read the resolving view rather
-    than the raw field, or it decides from a value that is already stale.
+    A resolver that reads a field another resolver may have decided has to read
+    `resolving_view` (or `ServerArgs._resolved()`); a bare field read there
+    answers with the raw input. `test_resolution_reads_the_declarations` is
+    what keeps that true.
 
     For resolvers inside ``__post_init__``: the handlers on ``ServerArgs``
     (through ``self._declare``) and the ``arg_groups`` hooks and hardware
@@ -292,8 +293,6 @@ def declare_resolution(server_args: Any, source: str, **fields: Any) -> None:
         stash = []
         object.__setattr__(server_args, "_resolved_overrides", stash)
     stash.append((source, dict(fields)))
-    for name, value in fields.items():
-        setattr(server_args, name, value)
 
 
 def declare_late_resolution(server_args: Any, source: str, **fields: Any) -> None:
