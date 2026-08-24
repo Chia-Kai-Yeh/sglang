@@ -256,6 +256,10 @@ _CONFIGURED_SIZE_CALL_SITES = {
         "the receiver labels and shards by the launch width; it runs in the "
         "tokenizer process, which holds no encoder groups"
     ),
+    ("srt/managers/rust_server.py", "tp_size"): (
+        "the rust server decides its transport from the launch width, in the "
+        "tokenizer process, which holds no model groups"
+    ),
     ("srt/utils/common.py", "tp_size"): (
         "the require_*_tp_gather predicates compared the configured tp_size "
         "when they read the record; the live property answers a different "

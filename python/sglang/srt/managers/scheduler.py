@@ -898,7 +898,7 @@ class Scheduler(
             initialize_moe_config()
 
         # Initialize GEMM-related configuration for FP8 and FP4 backends.
-        initialize_fp8_gemm_config(self.server_args)
+        initialize_fp8_gemm_config()
         initialize_fp4_gemm_config(self.server_args)
         initialize_bf16_gemm_config(self.server_args)
 

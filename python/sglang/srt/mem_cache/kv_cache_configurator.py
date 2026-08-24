@@ -1262,7 +1262,7 @@ class KVCacheConfigurator:
             sparse_layer_ids=sparse_layer_ids,
             disable_value_sparse_layer_ids=disable_value_sparse_layer_ids,
             device=self.device,
-            enable_memory_saver=self.server_args.enable_memory_saver,
+            enable_memory_saver=get_exec().features.enable_memory_saver,
             start_layer=self.layer_info.start_layer,
             end_layer=self.layer_info.end_layer,
         )

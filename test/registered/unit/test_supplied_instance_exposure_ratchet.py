@@ -146,12 +146,9 @@ _PASSED = frozenset({"model_path", "device", "random_seed"})
 #       the auto-parser detection is late resolution: it runs in the launcher's
 #       validation stage, decides these fields and writes them *in place*,
 #       before the publish that would give it a bag.
-_EXPOSED = {
-    ("entrypoints/engine.py", "enable_symm_mem"),
-    ("entrypoints/engine.py", "reasoning_parser"),
-    ("entrypoints/engine.py", "tool_call_parser"),
-    ("parser/template_detection.py", "model_path"),
-}
+# Empty: the launcher's own reads of a resolution-written field now go through
+# the declarations, and so does the auto-parser detection it calls.
+_EXPOSED: frozenset = frozenset()
 
 # Pairs whose resolution write only happens on a CUDA host (capability or
 # `is_cuda()` gated): asserted on the CUDA registration, invisible to the CPU
@@ -164,11 +161,7 @@ _EXPOSED_CUDA_ONLY: frozenset = frozenset()
 # Axis two: (file, field) pairs where a supplied-instance read names a field that
 # some code overrides post-publish. Each needs an ordering judgment, not a blanket
 # conversion; the list exists so a new one is a decision made when it is written.
-_OVERRIDDEN_AND_READ = {
-    ("entrypoints/engine.py", "reasoning_parser"),
-    ("entrypoints/engine.py", "tool_call_parser"),
-    ("parser/template_detection.py", "model_path"),
-}
+_OVERRIDDEN_AND_READ: frozenset = frozenset()
 
 
 def _expanded_override_keys(rel, tree, call, kw) -> set:
