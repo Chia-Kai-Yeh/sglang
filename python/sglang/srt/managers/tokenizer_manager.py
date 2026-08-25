@@ -140,6 +140,9 @@ from sglang.srt.server_args import (
     ServerArgs,
     set_global_server_args_for_tokenizer,
 )
+from sglang.srt.speculative.spec_teacher_forcing import (
+    validate_and_clamp_sampling_params as validate_spec_teacher_forcing_params,
+)
 from sglang.srt.utils import (
     configure_gc_warning,
     freeze_gc,
@@ -1197,6 +1200,9 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         self, obj: Union[GenerateReqInput, EmbeddingReqInput], input_ids: List[int]
     ) -> None:
         """Validates that the input token count and the requested token count doesn't exceed the model's context length."""
+        # Runs first so the context-length checks below see the capped value.
+        validate_spec_teacher_forcing_params(obj.sampling_params)
+
         # FIXME: unify the length validation logic with the one in the scheduler.
         _max_req_len = self.context_len
         input_token_num = len(input_ids) if input_ids is not None else 0

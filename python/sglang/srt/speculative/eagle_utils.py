@@ -665,6 +665,13 @@ def eagle_sample(
     from sglang.srt.sampling.penaltylib.repetition_penalty import (
         apply_scaling_penalties,
     )
+    from sglang.srt.speculative.spec_teacher_forcing import (
+        build_base_windows,
+        build_forced_target_predicts_tree,
+        force_reject_all_drafts_tree,
+        read_base_output_ids,
+        record_accept_lengths,
+    )
     from sglang.srt.speculative.spec_utils import (
         SIMULATE_ACC_LEN,
         SIMULATE_ACC_TOKEN_MODE,
@@ -721,11 +728,28 @@ def eagle_sample(
     )
     num_correct_drafts = torch.empty((bs,), dtype=torch.int32, device=device)
 
+    # Verify against a prior base run's trajectory instead of the target's own
+    # argmax when speculative teacher forcing is active (None otherwise).
+    base_output_ids = read_base_output_ids(batch.reqs)
+
     # Sample tokens
     target_predict = None
     if sampling_info.is_all_greedy or _is_cpu or _is_npu or _is_hip or _is_xpu:
-        target_predict = torch.argmax(next_token_logits, dim=-1)
-        target_predict = target_predict.reshape(bs, verify_input.draft_token_num)
+        if base_output_ids is not None:
+            target_predict = build_forced_target_predicts_tree(
+                windows=build_base_windows(
+                    base_output_ids=base_output_ids,
+                    num_output_tokens=[len(req.output_ids) for req in batch.reqs],
+                    width=verify_input.draft_token_num,
+                    device=device,
+                ),
+                positions=verify_input.positions,
+                bs=bs,
+                draft_token_num=verify_input.draft_token_num,
+            )
+        else:
+            target_predict = torch.argmax(next_token_logits, dim=-1)
+            target_predict = target_predict.reshape(bs, verify_input.draft_token_num)
         predict, accept_index, num_correct_drafts = verify_tree_greedy_func(
             predicts=predict,  # mutable
             accept_index=accept_index,  # mutable
@@ -852,6 +876,26 @@ def eagle_sample(
             tp_group.broadcast(predict, src=0)
             tp_group.broadcast(accept_index, src=0)
             tp_group.broadcast(num_correct_drafts, src=0)
+
+    if base_output_ids is not None:
+        if target_predict is None:
+            raise ValueError(
+                "Speculative teacher forcing requires greedy verification, but "
+                "this batch took the sampling path. Send temperature=0."
+            )
+        # Record what the drafts would have earned against the base trajectory,
+        # then commit only the next base token so the next step is measured from
+        # the same ground-truth prefix.
+        record_accept_lengths(
+            logits_output=logits_output,
+            num_accept_tokens=(num_correct_drafts + 1).tolist(),
+        )
+        force_reject_all_drafts_tree(
+            predicts=predict,  # mutable
+            accept_indices=accept_index,  # mutable
+            num_correct_drafts=num_correct_drafts,  # mutable
+            target_predicts=target_predict,
+        )
 
     if SIMULATE_ACC_LEN > 0:
         # Do simulation. The helper builds (and returns) a replacement

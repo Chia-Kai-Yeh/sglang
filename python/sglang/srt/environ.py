@@ -469,6 +469,12 @@ class Envs:
     SGLANG_SIMULATE_ACC_TOKEN_MODE = EnvStr("fixed")
     SGLANG_SIMULATE_UNIFORM_EXPERTS = EnvBool(False)
     SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS = EnvBool(False)
+    # Master switch for the speculative teacher-forcing measurement mode: verify
+    # every draft against a prior base run's output ids, record the accept length
+    # that would have been reached, then reject all drafts so each step commits
+    # exactly one base token. Mutually exclusive with SGLANG_SIMULATE_ACC_LEN.
+    # See python/sglang/srt/speculative/spec_teacher_forcing.py.
+    SGLANG_SPEC_TEACHER_FORCING = EnvBool(False)
 
     # ===================================================================
     # DSpark speculative decoding

@@ -50,6 +50,13 @@ from sglang.srt.speculative.draft_worker_common import (
     make_draft_sampler_capture_hook,
 )
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
+from sglang.srt.speculative.spec_teacher_forcing import (
+    apply_prefill_teacher_forcing,
+    build_forced_target_predicts_chain,
+    force_reject_all_drafts_chain,
+    read_base_output_ids,
+    record_accept_lengths,
+)
 from sglang.srt.speculative.spec_utils import (
     SIMULATE_ACC_LEN,
     SIMULATE_ACC_METHOD,
@@ -1454,6 +1461,11 @@ class DFlashWorkerV2(BaseSpecWorker):
                 batch_output.logits_output,
                 batch_output.next_token_ids,
             )
+            apply_prefill_teacher_forcing(
+                reqs=batch.reqs,
+                next_token_ids=next_token_ids,  # mutable
+                logits_output=logits_output,  # mutable
+            )
             batch_output.new_seq_lens = batch.seq_lens
             if on_publish is not None:
                 on_publish(batch_output.new_seq_lens)
@@ -1782,6 +1794,9 @@ class DFlashWorkerV2(BaseSpecWorker):
 
         candidates = draft_tokens
         new_seq_lens = None
+        # Verify against a prior base run's trajectory instead of the target's
+        # own argmax when speculative teacher forcing is active (None otherwise).
+        base_output_ids = read_base_output_ids(batch.reqs)
         # Only the greedy branch sets target_predict; the simulated-acceptance
         # override below checks for it.
         target_predict = None
@@ -1806,9 +1821,17 @@ class DFlashWorkerV2(BaseSpecWorker):
             out_tokens[:, int(self.block_size) - 1].fill_(0)
             out_tokens.scatter_(1, accept_len.to(torch.int64)[:, None], bonus[:, None])
         else:
-            target_predict = torch.argmax(logits_output.next_token_logits, dim=-1).view(
-                bs, int(self.block_size)
-            )
+            if base_output_ids is not None:
+                target_predict = build_forced_target_predicts_chain(
+                    base_output_ids=base_output_ids,
+                    num_output_tokens=[len(req.output_ids) for req in batch.reqs],
+                    block_size=int(self.block_size),
+                    device=device,
+                )
+            else:
+                target_predict = torch.argmax(
+                    logits_output.next_token_logits, dim=-1
+                ).view(bs, int(self.block_size))
             if self._use_triton_accept_bonus:
                 try:
                     (
@@ -1867,6 +1890,30 @@ class DFlashWorkerV2(BaseSpecWorker):
                 out_tokens.scatter_(
                     1, accept_len.to(torch.int64)[:, None], bonus[:, None]
                 )
+
+        if base_output_ids is not None:
+            if target_predict is None:
+                raise ValueError(
+                    "Speculative teacher forcing requires greedy verification, but "
+                    "this batch took the sampling path. Send temperature=0."
+                )
+            # Record what the drafts would have earned against the base
+            # trajectory, then commit only the next base token so the next step
+            # is measured from the same ground-truth prefix.
+            record_accept_lengths(
+                logits_output=logits_output,
+                num_accept_tokens=(accept_len + 1).tolist(),
+            )
+            force_reject_all_drafts_chain(
+                num_correct_drafts=accept_len,  # mutable
+                commit_lens=commit_lens,  # mutable
+                bonus_tokens=bonus,  # mutable
+                out_tokens=out_tokens,  # mutable
+                target_predicts=target_predict,
+            )
+            # The Triton path wrote new_seq_lens from the real accept_len;
+            # recompute it from the forced commit_lens below.
+            new_seq_lens = None
 
         if SIMULATE_ACC_LEN > 0:
             if SIMULATE_ACC_TOKEN_MODE not in ("fixed", "real-draft-token"):

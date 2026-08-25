@@ -21,6 +21,7 @@ from sglang.srt.speculative.base_spec_worker import BaseSpecWorker, EagleDraftWo
 from sglang.srt.speculative.cpp_ngram.ngram_corpus import NgramCorpus
 from sglang.srt.speculative.eagle_utils import eagle_sample
 from sglang.srt.speculative.ngram_info import NgramVerifyInput
+from sglang.srt.speculative.spec_teacher_forcing import apply_prefill_teacher_forcing
 from sglang.srt.speculative.spec_utils import (
     GrammarTree,
     build_grammar_vocab_mask,
@@ -529,6 +530,11 @@ class NGRAMWorker(BaseSpecWorker):
                 batch_result.logits_output,
                 batch_result.next_token_ids,
                 batch_result.can_run_cuda_graph,
+            )
+            apply_prefill_teacher_forcing(
+                reqs=batch.reqs,
+                next_token_ids=predict,  # mutable
+                logits_output=logits_output,  # mutable
             )
             new_seq_lens = batch.seq_lens.clone()
 

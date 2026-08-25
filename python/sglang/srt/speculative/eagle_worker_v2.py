@@ -85,6 +85,7 @@ from sglang.srt.speculative.eagle_worker_common import (
     run_eagle_verify,
 )
 from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
+from sglang.srt.speculative.spec_teacher_forcing import apply_prefill_teacher_forcing
 from sglang.srt.speculative.spec_utils import (
     draft_tp_context,
     fast_sample,
@@ -1117,6 +1118,11 @@ class EAGLEWorkerV2(BaseSpecWorker):
             )
             batch_output = self.target_worker.forward_batch_generation(
                 batch, capture_hidden_mode=target_capture_mode
+            )
+            apply_prefill_teacher_forcing(
+                reqs=batch.reqs,
+                next_token_ids=batch_output.next_token_ids,  # mutable
+                logits_output=batch_output.logits_output,  # mutable
             )
 
             # Spec_v2 convention: batch.seq_lens = length BEFORE this iter's tokens.

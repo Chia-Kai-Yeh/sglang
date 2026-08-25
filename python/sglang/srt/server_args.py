@@ -9335,6 +9335,12 @@ class ServerArgs:
                 "--kv-canary-sweep-interval requires --kv-canary in {log, raise}"
             )
 
+        from sglang.srt.speculative.spec_teacher_forcing import (
+            validate_server_args as validate_spec_teacher_forcing_server_args,
+        )
+
+        validate_spec_teacher_forcing_server_args(self)
+
     def check_lora_server_args(self):
         assert self.max_loras_per_batch > 0, "max_loras_per_batch must be positive"
 
