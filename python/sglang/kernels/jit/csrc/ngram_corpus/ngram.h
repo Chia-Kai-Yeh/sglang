@@ -63,7 +63,7 @@ class Ngram {
 
   std::vector<std::pair<std::string, int64_t>> listExternalCorpora() const;
 
-  Result batchMatch(
+  BatchMatchResult batchMatch(
       const std::vector<int64_t>& state_ids,
       const std::vector<std::vector<int32_t>>& tokens,
       const std::vector<size_t>& total_lens);

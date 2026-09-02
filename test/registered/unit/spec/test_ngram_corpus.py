@@ -50,11 +50,12 @@ def _batch_get(
     corpus: NgramCorpus,
     batch_tokens: list[list[int]],
 ):
-    return corpus.batch_get(
+    ids, masks, _ = corpus.batch_get(
         req_ids=[uuid.uuid4().hex for _ in range(len(batch_tokens))],
         batch_tokens=batch_tokens,
         total_lens=[len(tokens) for tokens in batch_tokens],
     )
+    return ids, masks
 
 
 def _batch_get_with_state(
@@ -63,7 +64,17 @@ def _batch_get_with_state(
     current_tokens: list[int],
     total_len: int,
 ):
-    return corpus.batch_get([req_id], [current_tokens], [total_len])
+    ids, masks, _ = corpus.batch_get([req_id], [current_tokens], [total_len])
+    return ids, masks
+
+
+def _match_depth(corpus: NgramCorpus, tokens: list[int]) -> int:
+    _, _, depths = corpus.batch_get(
+        req_ids=[uuid.uuid4().hex],
+        batch_tokens=[tokens],
+        total_lens=[len(tokens)],
+    )
+    return int(depths[0])
 
 
 class _IntTokenizer:
@@ -973,6 +984,44 @@ class TestMultiSamHttpMock(CustomTestCase):
         data = resp.json()
         self.assertTrue(data["success"])
         self.assertEqual(data["corpus_token_counts"], {"a": 100, "b": 200})
+
+
+class TestNgramCorpusMatchDepth(CustomTestCase):
+    """The per-request trie match depth reported alongside the draft tree.
+
+    It is the deepest context suffix that is present in the trie *and* has
+    children -- i.e. the anchor that actually seeds the draft tree.
+    """
+
+    @staticmethod
+    def _corpus(sequences, **kwargs):
+        corpus = _make_corpus("BFS", **kwargs)
+        corpus.batch_put(sequences)
+        corpus.synchronize()
+        return corpus
+
+    def test_leaf_anchor_falls_back_to_the_shallower_expandable_one(self):
+        # "7 8 9" exists at depth 3 but is a leaf; "8 9" has child 5 via the
+        # second sequence, so the deepest *expandable* anchor is depth 2.
+        corpus = self._corpus([[7, 8, 9], [8, 9, 5]])
+        self.assertEqual(_match_depth(corpus, [7, 8, 9]), 2)
+
+        # Same query, but now "7 8 9" has a child -- the depth-3 anchor becomes
+        # expandable, which proves it was present all along above.
+        corpus = self._corpus([[7, 8, 9], [8, 9, 5], [7, 8, 9, 1]])
+        self.assertEqual(_match_depth(corpus, [7, 8, 9]), 3)
+
+    def test_context_absent_from_the_corpus_reports_zero(self):
+        corpus = self._corpus([[1, 2, 3]])
+        self.assertEqual(_match_depth(corpus, [9999, 9998]), 0)
+
+    def test_depth_saturates_one_below_max_trie_depth(self):
+        # insert() only walks max_trie_depth tokens, so a node at that depth can
+        # never have children and can never be the reported anchor.
+        corpus = self._corpus([[1, 2, 3, 4, 5, 6, 7, 8]], max_trie_depth=4)
+        for tail in ([1, 2, 3], [1, 2, 3, 4], [1, 2, 3, 4, 5]):
+            with self.subTest(tail=tail):
+                self.assertEqual(_match_depth(corpus, tail), 3)
 
 
 if __name__ == "__main__":

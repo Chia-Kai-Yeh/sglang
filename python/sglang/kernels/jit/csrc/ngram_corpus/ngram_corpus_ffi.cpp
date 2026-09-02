@@ -59,7 +59,8 @@ struct NgramCorpusObj : public tvm::ffi::Object {
       const tvm::ffi::TensorView offsets,
       const tvm::ffi::TensorView total_lens_tv,
       const tvm::ffi::TensorView out_tokens,
-      const tvm::ffi::TensorView out_mask) {
+      const tvm::ffi::TensorView out_mask,
+      const tvm::ffi::TensorView out_depths) {
     auto* sid = static_cast<const int64_t*>(state_ids_tv.data_ptr());
     auto* data = static_cast<const int32_t*>(tokens_flat.data_ptr());
     auto* offs = static_cast<const int64_t*>(offsets.data_ptr());
@@ -75,7 +76,8 @@ struct NgramCorpusObj : public tvm::ffi::Object {
     }
 
     auto result = ngram_->batchMatch(state_ids, tokens, total_lens);
-    write_result_(result, out_tokens, out_mask);
+    write_result_(result.result, out_tokens, out_mask);
+    write_match_depths_(result.match_depths, out_depths);
   }
 
   void erase_match_state(const tvm::ffi::TensorView state_ids_tv) {
@@ -147,6 +149,16 @@ struct NgramCorpusObj : public tvm::ffi::Object {
     }
     std::memcpy(out_tok, result.token.data(), result.token.size() * sizeof(int32_t));
     std::memcpy(out_msk, result.mask.data(), result.mask.size() * sizeof(uint8_t));
+  }
+
+  void write_match_depths_(const std::vector<int32_t>& match_depths, const tvm::ffi::TensorView& out_depths) {
+    if (match_depths.size() > static_cast<size_t>(out_depths.size(0))) {
+      throw std::runtime_error(
+          "out_depths buffer too small: " + std::to_string(out_depths.size(0)) + " < " +
+          std::to_string(match_depths.size()));
+    }
+    std::memcpy(
+        static_cast<int32_t*>(out_depths.data_ptr()), match_depths.data(), match_depths.size() * sizeof(int32_t));
   }
 
   std::unique_ptr<ngram::Ngram> ngram_;

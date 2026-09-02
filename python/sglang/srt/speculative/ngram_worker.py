@@ -21,7 +21,10 @@ from sglang.srt.speculative.base_spec_worker import BaseSpecWorker, EagleDraftWo
 from sglang.srt.speculative.cpp_ngram.ngram_corpus import NgramCorpus
 from sglang.srt.speculative.eagle_utils import eagle_sample
 from sglang.srt.speculative.ngram_info import NgramVerifyInput
-from sglang.srt.speculative.spec_teacher_forcing import apply_prefill_teacher_forcing
+from sglang.srt.speculative.spec_teacher_forcing import (
+    apply_prefill_teacher_forcing,
+    record_ngram_match_depths,
+)
 from sglang.srt.speculative.spec_utils import (
     GrammarTree,
     build_grammar_vocab_mask,
@@ -108,6 +111,9 @@ class NGRAMWorker(BaseSpecWorker):
         # requests that left the batch (see forward_batch_generation).
         self._prev_decode_rids: set = set()
         self.grammar_tree_host: Optional[tuple] = None
+        # Per-request trie match depths of the current draft prep; see
+        # _prepare_for_speculative_decoding.
+        self.ngram_match_depths: Optional[np.ndarray] = None
 
         self.ngram_corpus = NgramCorpus(
             min_bfs_breadth=server_args.speculative_ngram_min_bfs_breadth,
@@ -238,7 +244,7 @@ class NGRAMWorker(BaseSpecWorker):
 
     def _prepare_draft_tokens(
         self, batch: ScheduleBatch
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         bs = len(batch.reqs)
         stride = self.draft_token_num
 
@@ -297,7 +303,7 @@ class NGRAMWorker(BaseSpecWorker):
             )
             batch_tokens.append(check_token)
             total_lens.append(base_lens[i] + len(prev_tokens))
-        req_drafts, mask = self.ngram_corpus.batch_get(
+        req_drafts, mask, match_depths = self.ngram_corpus.batch_get(
             req_ids, batch_tokens, total_lens
         )
         total_draft_token_num = len(req_drafts)
@@ -306,7 +312,7 @@ class NGRAMWorker(BaseSpecWorker):
         assert (
             total_draft_token_num == bs * self.draft_token_num
         ), f"{total_draft_token_num=}, {bs=}, {self.draft_token_num=}"
-        return req_drafts, mask
+        return req_drafts, mask, match_depths
 
     def _prepare_for_speculative_decoding(self, batch: ScheduleBatch):
         # Decode-only: extend goes through the plain target forward, and an
@@ -335,7 +341,11 @@ class NGRAMWorker(BaseSpecWorker):
                 for i in range(bs)
             ]
 
-        req_drafts, mask = self._prepare_draft_tokens(batch)
+        req_drafts, mask, match_depths = self._prepare_draft_tokens(batch)
+        # Staged here because the trie lookup happens before the verify forward,
+        # while logits_output -- where the depths are recorded -- only exists
+        # after it. Consumed in forward_batch_generation below.
+        self.ngram_match_depths = match_depths
         tree_mask.copy_(torch.from_numpy(mask), non_blocking=True)
         draft_tokens.copy_(torch.from_numpy(req_drafts), non_blocking=True)
 
@@ -481,6 +491,11 @@ class NGRAMWorker(BaseSpecWorker):
                 accept_lens,
                 accept_index,
             ) = eagle_sample(verify_input, batch, logits_output, grammar_mask)
+            record_ngram_match_depths(
+                reqs=batch.reqs,
+                logits_output=logits_output,  # mutable
+                match_depths=self.ngram_match_depths,
+            )
             new_seq_lens = batch.seq_lens + accept_lens
             commit_mamba_states_after_verify(
                 self.target_worker,
@@ -535,6 +550,13 @@ class NGRAMWorker(BaseSpecWorker):
                 reqs=batch.reqs,
                 next_token_ids=predict,  # mutable
                 logits_output=logits_output,  # mutable
+            )
+            # No trie lookup on prefill; reserve the slot so the series stays
+            # aligned with output_ids.
+            record_ngram_match_depths(
+                reqs=batch.reqs,
+                logits_output=logits_output,  # mutable
+                match_depths=None,
             )
             new_seq_lens = batch.seq_lens.clone()
 

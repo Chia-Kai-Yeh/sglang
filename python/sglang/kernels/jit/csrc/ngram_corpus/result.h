@@ -15,6 +15,15 @@ struct Result {
   void truncate(size_t n);
 };
 
+// Batch accumulator: the merged draft trees plus one trie match depth per
+// request, in batch order. Kept out of Result because Result is also the
+// per-request return type of fillResult / combineRootResults_, where a batch
+// level depth has no meaning.
+struct BatchMatchResult {
+  Result result;
+  std::vector<int32_t> match_depths;
+};
+
 struct Node {
   std::unordered_map<int32_t, int32_t> next;
 };

@@ -79,6 +79,11 @@ class Trie {
       MatchState& state,
       size_t total_len) const;
 
+  // Depth of the deepest cached anchor that is still expandable -- it resolves
+  // to a live node and that node has children, so it can seed a draft tree.
+  // 0 when no cached suffix can be expanded.
+  int32_t maxExpandableMatchDepth(const MatchState& state) const;
+
   void squeeze(size_t count);
 
   void reset();

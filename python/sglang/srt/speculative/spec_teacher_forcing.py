@@ -15,6 +15,11 @@ Because every step advances by exactly one token, each output position is
 measured under the same ground-truth prefix, and EAGLE3 / DFLASH / NGRAM are all
 measured on an identical trajectory.
 
+Under NGRAM each step additionally records the trie match depth that seeded the
+draft tree as ``meta_info["spec_teacher_forcing_ngram_match_depth"]``, aligned
+the same way. It is the explanatory variable for the accept length: a shallow
+match has little context to speculate from. EAGLE3 / DFLASH do not emit it.
+
 Known measurement artifact: near the end of the base sequence the comparison
 window runs out of real tokens and is padded with a sentinel that never matches,
 so the last ``draft_token_num`` steps are truncated (biased low). The sentinel is
@@ -26,6 +31,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+import numpy as np
 import torch
 
 from sglang.srt.environ import envs
@@ -41,6 +47,8 @@ logger = logging.getLogger(__name__)
 SPEC_TEACHER_FORCING_IDS_KEY = "spec_teacher_forcing_ids"
 # meta_info key carrying the per-step accept length (bonus included).
 SPEC_TEACHER_FORCING_ACCEPT_LENGTH_KEY = "spec_teacher_forcing_accept_length"
+# meta_info key carrying the per-step NGRAM trie match depth. NGRAM only.
+SPEC_TEACHER_FORCING_NGRAM_MATCH_DEPTH_KEY = "spec_teacher_forcing_ngram_match_depth"
 
 SPEC_TEACHER_FORCING_ENABLED = envs.SGLANG_SPEC_TEACHER_FORCING.get()
 
@@ -271,7 +279,34 @@ def record_accept_lengths(
     Rides the existing ``customized_info`` pipeline, which appends one element
     per request per step and ends up as ``meta_info[...]``.
     """
-    _stage_customized_info(logits_output=logits_output, values=num_accept_tokens)
+    _stage_customized_info(
+        logits_output=logits_output,
+        key=SPEC_TEACHER_FORCING_ACCEPT_LENGTH_KEY,
+        values=num_accept_tokens,
+    )
+
+
+def record_ngram_match_depths(
+    *,
+    reqs: List[Req],
+    logits_output: LogitsProcessorOutput,
+    match_depths: Optional[np.ndarray],
+) -> None:
+    """Stage one NGRAM trie match depth per request for this step.
+
+    ``match_depths`` is ``None`` on the prefill step, where no trie lookup runs.
+    The slot is still reserved with ``None``: the result processor appends one
+    element per request for every key present, so a short list would misalign
+    the whole series against ``output_ids``.
+    """
+    if read_base_output_ids(reqs) is None:
+        return
+
+    _stage_customized_info(
+        logits_output=logits_output,
+        key=SPEC_TEACHER_FORCING_NGRAM_MATCH_DEPTH_KEY,
+        values=[None] * len(reqs) if match_depths is None else match_depths.tolist(),
+    )
 
 
 def apply_prefill_teacher_forcing(
@@ -296,16 +331,21 @@ def apply_prefill_teacher_forcing(
     next_token_ids.copy_(
         torch.tensor(forced, dtype=next_token_ids.dtype, device=next_token_ids.device)
     )
-    _stage_customized_info(logits_output=logits_output, values=[None] * len(reqs))
+    _stage_customized_info(
+        logits_output=logits_output,
+        key=SPEC_TEACHER_FORCING_ACCEPT_LENGTH_KEY,
+        values=[None] * len(reqs),
+    )
 
 
 def _stage_customized_info(
     *,
     logits_output: LogitsProcessorOutput,
+    key: str,
     values: List[Any],
 ) -> None:
     customized_info: Optional[Dict[str, List[Any]]] = logits_output.customized_info
     if customized_info is None:
         customized_info = {}
         logits_output.customized_info = customized_info
-    customized_info[SPEC_TEACHER_FORCING_ACCEPT_LENGTH_KEY] = values
+    customized_info[key] = values

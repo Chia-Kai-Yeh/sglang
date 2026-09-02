@@ -102,7 +102,13 @@ class NgramCorpus:
         req_ids: List[str],
         batch_tokens: List[List[int]],
         total_lens: List[int],
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Draft tokens, tree mask, and the per-request trie match depth.
+
+        The depth is the deepest suffix of the query tail that is present in the
+        online trie *and* has children -- the anchor that seeded the draft tree.
+        External SAM corpora do not contribute to it.
+        """
         state_ids = [self._get_state_id(rid) for rid in req_ids]
         return self._obj.match_stateful(state_ids, batch_tokens, total_lens)
 
@@ -191,10 +197,11 @@ if __name__ == "__main__":
 
     corpus.synchronize()
     queries = [[1, 2, 3], [3, 44], [3, 6, 999]]
-    decoding_ids, decoding_masks = corpus.batch_get(
+    decoding_ids, decoding_masks, match_depths = corpus.batch_get(
         req_ids=[f"query-{i}" for i in range(len(queries))],
         batch_tokens=queries,
         total_lens=[len(q) for q in queries],
     )
 
+    logger.info(f"{match_depths=}")
     corpus.debug_result(decoding_ids, decoding_masks)

@@ -7,6 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+import numpy as np
 import torch
 
 from sglang.srt.environ import envs
@@ -342,6 +343,91 @@ class TestCustomizedInfoStaging(CustomTestCase):
         self.assertEqual(
             logits_output.customized_info,
             {"other": [1], stf.SPEC_TEACHER_FORCING_ACCEPT_LENGTH_KEY: [3, 1]},
+        )
+
+
+class TestNgramMatchDepthStaging(CustomTestCase):
+    """NGRAM-only per-step trie match depth, staged onto the same pipeline."""
+
+    def test_verify_step_stages_one_depth_per_request(self):
+        reqs = [
+            _make_req({stf.SPEC_TEACHER_FORCING_IDS_KEY: [42, 43]}),
+            _make_req({stf.SPEC_TEACHER_FORCING_IDS_KEY: [50, 51]}),
+        ]
+        logits_output = SimpleNamespace(customized_info=None)
+
+        with mock.patch.object(stf, "SPEC_TEACHER_FORCING_ENABLED", True):
+            stf.record_ngram_match_depths(
+                reqs=reqs,
+                logits_output=logits_output,
+                match_depths=np.array([6, 0], dtype=np.int32),
+            )
+
+        staged = logits_output.customized_info[
+            stf.SPEC_TEACHER_FORCING_NGRAM_MATCH_DEPTH_KEY
+        ]
+        self.assertEqual(staged, [6, 0])
+        # Plain ints, not numpy scalars -- these get pickled to the tokenizer.
+        self.assertTrue(all(type(value) is int for value in staged))
+
+    def test_prefill_reserves_a_slot(self):
+        # No trie lookup on prefill, but the slot must exist or the whole series
+        # shifts by one against output_ids.
+        reqs = [_make_req({stf.SPEC_TEACHER_FORCING_IDS_KEY: [42, 43]})]
+        logits_output = SimpleNamespace(customized_info=None)
+
+        with mock.patch.object(stf, "SPEC_TEACHER_FORCING_ENABLED", True):
+            stf.record_ngram_match_depths(
+                reqs=reqs,
+                logits_output=logits_output,
+                match_depths=None,
+            )
+
+        self.assertEqual(
+            logits_output.customized_info,
+            {stf.SPEC_TEACHER_FORCING_NGRAM_MATCH_DEPTH_KEY: [None]},
+        )
+
+    def test_disabled_stages_nothing(self):
+        logits_output = SimpleNamespace(customized_info=None)
+        with mock.patch.object(stf, "SPEC_TEACHER_FORCING_ENABLED", False):
+            stf.record_ngram_match_depths(
+                reqs=[_make_req({stf.SPEC_TEACHER_FORCING_IDS_KEY: [42]})],
+                logits_output=logits_output,
+                match_depths=np.array([3], dtype=np.int32),
+            )
+        self.assertIsNone(logits_output.customized_info)
+
+    def test_request_without_ids_stages_nothing(self):
+        logits_output = SimpleNamespace(customized_info=None)
+        with mock.patch.object(stf, "SPEC_TEACHER_FORCING_ENABLED", True):
+            stf.record_ngram_match_depths(
+                reqs=[_make_req(None)],
+                logits_output=logits_output,
+                match_depths=np.array([3], dtype=np.int32),
+            )
+        self.assertIsNone(logits_output.customized_info)
+
+    def test_depth_and_accept_length_coexist(self):
+        reqs = [_make_req({stf.SPEC_TEACHER_FORCING_IDS_KEY: [42, 43]})]
+        logits_output = SimpleNamespace(customized_info=None)
+
+        with mock.patch.object(stf, "SPEC_TEACHER_FORCING_ENABLED", True):
+            stf.record_accept_lengths(
+                logits_output=logits_output, num_accept_tokens=[4]
+            )
+            stf.record_ngram_match_depths(
+                reqs=reqs,
+                logits_output=logits_output,
+                match_depths=np.array([9], dtype=np.int32),
+            )
+
+        self.assertEqual(
+            logits_output.customized_info,
+            {
+                stf.SPEC_TEACHER_FORCING_ACCEPT_LENGTH_KEY: [4],
+                stf.SPEC_TEACHER_FORCING_NGRAM_MATCH_DEPTH_KEY: [9],
+            },
         )
 
 

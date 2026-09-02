@@ -141,7 +141,7 @@ void Ngram::insertWorker() {
   }
 }
 
-Result Ngram::batchMatch(
+BatchMatchResult Ngram::batchMatch(
     const std::vector<int64_t>& state_ids,
     const std::vector<std::vector<int32_t>>& tokens,
     const std::vector<size_t>& total_lens) {
@@ -174,7 +174,9 @@ Result Ngram::batchMatch(
   const size_t per_sam_budget = num_sams > 0 ? total_sam_budget / num_sams : size_t{0};
   const size_t trie_budget = total_draft_token_num - (per_sam_budget * num_sams);
 
-  Result merged;
+  BatchMatchResult out;
+  Result& merged = out.result;
+  out.match_depths.reserve(state_ids.size());
   for (size_t i = 0; i < state_ids.size(); ++i) {
     const auto& suffix = tokens[i];
     if (suffix.empty()) {
@@ -186,6 +188,7 @@ Result Ngram::batchMatch(
     if (total_sam_budget == 0 || per_sam_budget == 0) {
       auto res = (trie_.get()->*trie_result_build_fn)(
           suffix.data(), suffix.size(), suffix.back(), total_draft_token_num, param_, state, total_lens[i]);
+      out.match_depths.push_back(trie_->maxExpandableMatchDepth(state));
       merged.token.insert(merged.token.end(), res.token.begin(), res.token.end());
       merged.mask.insert(merged.mask.end(), res.mask.begin(), res.mask.end());
       continue;
@@ -193,6 +196,7 @@ Result Ngram::batchMatch(
 
     auto combined = (trie_.get()->*trie_result_build_fn)(
         suffix.data(), suffix.size(), suffix.back(), trie_budget, param_, state, total_lens[i]);
+    out.match_depths.push_back(trie_->maxExpandableMatchDepth(state));
 
     for (const auto& [_, sam] : sams_) {
       auto sam_res =
@@ -203,7 +207,7 @@ Result Ngram::batchMatch(
     merged.token.insert(merged.token.end(), combined.token.begin(), combined.token.end());
     merged.mask.insert(merged.mask.end(), combined.mask.begin(), combined.mask.end());
   }
-  return merged;
+  return out;
 }
 
 void Ngram::eraseMatchState(const std::vector<int64_t>& state_ids) {

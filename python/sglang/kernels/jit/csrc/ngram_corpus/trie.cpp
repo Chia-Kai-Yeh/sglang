@@ -201,6 +201,18 @@ std::vector<std::pair<const TrieNode*, int32_t>> Trie::getExpandableAnchors_(con
   return result;
 }
 
+int32_t Trie::maxExpandableMatchDepth(const MatchState& state) const {
+  // Same predicate and same deepest-first order as getExpandableAnchors_; only
+  // the first hit is needed, so the walk stops there.
+  for (size_t depth = state.anchors.size(); depth > 0; --depth) {
+    const auto node = resolve(state, state.anchors[depth - 1]);
+    if (node != nullptr && !node->child.empty()) {
+      return static_cast<int32_t>(depth);
+    }
+  }
+  return 0;
+}
+
 std::vector<std::pair<const TrieNode*, int32_t>>
 Trie::match(const int32_t* context, size_t len, MatchState& state, size_t total_len) const {
   const bool has_forward_progress = total_len >= state.processed_total_len;
