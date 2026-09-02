@@ -91,6 +91,27 @@ steps = [x for x in lengths if x is not None]
 print(sum(steps) / len(steps))
 ```
 
+Under `NGRAM` a second list comes back aligned the same way:
+`meta_info["spec_teacher_forcing_ngram_match_depth"]` — for each verify step,
+the deepest suffix of the current context that is present in the n-gram trie
+**and has children**, i.e. the anchor that actually seeded the draft tree. `0`
+means nothing usable matched. It is the explanatory variable for the accept
+length above: a shallow match has little context to speculate from.
+
+```python
+depths = out["meta_info"]["spec_teacher_forcing_ngram_match_depth"]
+for step, (length, depth) in enumerate(zip(lengths, depths)):
+    if length is not None:
+        print(step, length, depth)
+```
+
+- The ceiling is `--speculative-ngram-max-trie-depth` **minus 1** (default
+  `17`): `Trie::insert()` only walks `max_trie_depth` tokens, so a node at that
+  depth can never have children and can never be the reported anchor.
+- External SAM corpora (`--speculative-ngram-external-corpus-path`) are **not**
+  counted; the number is the online trie's depth only.
+- `EAGLE3` / `DFLASH` do not emit this key at all.
+
 Repeat step 2 for DFLASH / NGRAM with the **same** `base_ids` to compare.
 
 ## Caveats
