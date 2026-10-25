@@ -780,6 +780,13 @@ class ModelConfig:
                 self.hf_text_config.configure_draft_model()
             )
 
+        # AngelSlim EAGLE3 drafters name the Llama EAGLE3 arch differently.
+        if (
+            is_draft_model
+            and self.hf_config.architectures[0] == "Eagle3LlamaForCausalLM"
+        ):
+            self.hf_config.architectures[0] = "LlamaForCausalLMEagle3"
+
         if is_draft_model and self.hf_config.architectures[0] in [
             "DeepseekV3ForCausalLM",
             "DeepseekV32ForCausalLM",
