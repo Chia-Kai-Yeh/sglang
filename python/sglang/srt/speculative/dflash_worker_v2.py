@@ -623,20 +623,6 @@ class DFlashWorkerV2(BaseSpecWorker):
                         "Disable DFLASH draft cuda graph because dp attention "
                         "is enabled (draft runs eager)."
                     )
-            if is_cuda() and capture_decode_cuda_graph:
-                available_mem = self._tp_sync.available_memory_gb(
-                    SpecTpSyncSite.DFLASH_MEM,
-                    self.device,
-                    self.gpu_id,
-                    group=get_tp_group(),
-                )
-                if available_mem < 1.0:
-                    capture_decode_cuda_graph = False
-                    logger.warning(
-                        "Disable DFLASH draft cuda graph because only %.2f GB GPU "
-                        "memory is available after target backend initialization.",
-                        available_mem,
-                    )
             if capture_decode_cuda_graph:
                 # Must run before capture so the draft graph folds the head in.
                 self._draft_sampler = self._maybe_build_draft_sampler()
